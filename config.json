@@ -1,0 +1,14 @@
+{
+  "start": {
+    "name": "F6"
+  },
+  "pause": {
+    "name": "F7"
+  },
+  "capture": {
+    "name": "F8"
+  },
+  "stop": {
+    "name": "F9"
+  }
+}
