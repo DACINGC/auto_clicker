@@ -1,7 +1,7 @@
 import tkinter as tk
 
 BALL_SIZE = 60
-DOCK_SIZE = 12
+DOCK_SIZE = 40
 DOCK_THRESHOLD = 30
 PANEL_W = 270
 PANEL_H = 330
@@ -38,6 +38,7 @@ class FloatingWidget:
         self.win.attributes("-transparentcolor", "#F0F0F0")
 
         self._build_ball()
+        self._build_dock()
         self._build_panel()
         self._show_ball()
         self._position_default()
@@ -87,11 +88,31 @@ class FloatingWidget:
             font=("Microsoft YaHei", 12, "bold"),
         )
 
-        self._ball_cv.tag_bind(self._ball, "<Button-1>", self._on_ball_click)
-        self._ball_cv.tag_bind(self._ball_text, "<Button-1>", self._on_ball_click)
         self._ball_cv.bind("<ButtonPress-1>", self._drag_start)
         self._ball_cv.bind("<B1-Motion>", self._drag_move)
         self._ball_cv.bind("<ButtonRelease-1>", self._drag_end)
+        self._ball_cv.bind("<Button-3>", self._on_right_click)
+
+    def _build_dock(self):
+        self._dock_frame = tk.Frame(self.win, bg="#F0F0F0")
+        self._dock_cv = tk.Canvas(
+            self._dock_frame,
+            width=DOCK_SIZE,
+            height=DOCK_SIZE,
+            bg="#F0F0F0",
+            highlightthickness=0,
+        )
+        self._dock_cv.pack()
+
+        self._dock_triangle = self._dock_cv.create_polygon(
+            0, DOCK_SIZE // 2,
+            DOCK_SIZE - 8, 5,
+            DOCK_SIZE - 8, DOCK_SIZE - 5,
+            fill="#9E9E9E", outline="#666", width=1,
+        )
+
+        self._dock_cv.bind("<Button-1>", self._on_dock_click)
+        self._dock_cv.bind("<Button-3>", self._on_right_click)
 
     def _build_panel(self):
         self._panel_frame = tk.Frame(self.win, bg=BG_DARK)
@@ -211,11 +232,62 @@ class FloatingWidget:
         else:
             self._show_ball()
 
-    def _on_ball_click(self, event):
+    def _on_right_click(self, event):
         if self._docked:
             self._undock()
-        else:
-            self._toggle()
+            return
+
+        menu = tk.Toplevel(self.win)
+        menu.overrideredirect(True)
+        menu.attributes("-topmost", True)
+        menu.configure(bg="#333")
+
+        bx, by = self._get_current_pos()
+        sw = self.win.winfo_screenwidth()
+        sh = self.win.winfo_screenheight()
+        menu_w, menu_h = 120, 70
+        mx = bx + BALL_SIZE + 5
+        my = by
+        mx = max(0, min(mx, sw - menu_w))
+        my = max(0, min(my, sh - menu_h))
+        menu.geometry(f"+{mx}+{my}")
+
+        def close_menu(_=None):
+            menu.destroy()
+
+        menu.bind("<FocusOut>", close_menu)
+
+        def on_close_ball():
+            menu.destroy()
+            self.hide()
+
+        def on_open_panel():
+            menu.destroy()
+            if not self.expanded:
+                self._toggle()
+
+        lbl_close = tk.Label(
+            menu, text="关闭悬浮球", bg="#333", fg="white",
+            font=("Microsoft YaHei", 9), padx=20, pady=6, cursor="hand2",
+        )
+        lbl_close.pack(fill="x")
+        lbl_close.bind("<Button-1>", lambda _: on_close_ball())
+        lbl_close.bind("<Enter>", lambda _: lbl_close.config(bg="#555"))
+        lbl_close.bind("<Leave>", lambda _: lbl_close.config(bg="#333"))
+
+        lbl_open = tk.Label(
+            menu, text="打开悬浮弹窗", bg="#333", fg="white",
+            font=("Microsoft YaHei", 9), padx=20, pady=6, cursor="hand2",
+        )
+        lbl_open.pack(fill="x")
+        lbl_open.bind("<Button-1>", lambda _: on_open_panel())
+        lbl_open.bind("<Enter>", lambda _: lbl_open.config(bg="#555"))
+        lbl_open.bind("<Leave>", lambda _: lbl_open.config(bg="#333"))
+
+        menu.focus_set()
+
+    def _on_dock_click(self, event):
+        self._undock()
 
     def show(self):
         self._visible = True
@@ -277,42 +349,31 @@ class FloatingWidget:
                 nx = max(0, min(nx, sw - BALL_SIZE))
                 ny = max(0, min(ny, sh - BALL_SIZE))
                 self.win.geometry(f"+{nx}+{ny}")
-                self._check_edge_snap(nx, ny)
 
     def _drag_end(self, event):
-        if self._drag_data.get("dragged"):
+        if not self._drag_data.get("dragged"):
+            if self._docked:
+                self._undock()
             return
+
+        if self.expanded or self._docked:
+            return
+
         nx = event.x_root - self._drag_data["x"]
         ny = event.y_root - self._drag_data["y"]
         sw = self.win.winfo_screenwidth()
         sh = self.win.winfo_screenheight()
 
-        if self._docked:
-            self._undock()
-        elif not self.expanded and (
-            nx <= DOCK_THRESHOLD
-            or nx + BALL_SIZE >= sw - DOCK_THRESHOLD
-            or ny <= DOCK_THRESHOLD
-            or ny + BALL_SIZE >= sh - DOCK_THRESHOLD
-        ):
-            pass
-        elif not self.expanded:
-            self._toggle()
+        if nx <= DOCK_THRESHOLD:
+            self._dock_to_edge("left", nx, ny)
+        elif nx + BALL_SIZE >= sw - DOCK_THRESHOLD:
+            self._dock_to_edge("right", nx, ny)
+        elif ny <= DOCK_THRESHOLD:
+            self._dock_to_edge("top", nx, ny)
+        elif ny + BALL_SIZE >= sh - DOCK_THRESHOLD:
+            self._dock_to_edge("bottom", nx, ny)
 
     # ── Edge snapping ─────────────────────────────────────────
-
-    def _check_edge_snap(self, x, y):
-        sw = self.win.winfo_screenwidth()
-        sh = self.win.winfo_screenheight()
-
-        if x <= DOCK_THRESHOLD:
-            self._dock_to_edge("left", x, y)
-        elif x + BALL_SIZE >= sw - DOCK_THRESHOLD:
-            self._dock_to_edge("right", x, y)
-        elif y <= DOCK_THRESHOLD:
-            self._dock_to_edge("top", x, y)
-        elif y + BALL_SIZE >= sh - DOCK_THRESHOLD:
-            self._dock_to_edge("bottom", x, y)
 
     def _dock_to_edge(self, edge, x, y):
         if self._docked or self._animating:
@@ -322,20 +383,40 @@ class FloatingWidget:
         sw = self.win.winfo_screenwidth()
         sh = self.win.winfo_screenheight()
 
+        self._ball_frame.pack_forget()
+        self._dock_frame.pack()
+
         if edge == "left":
             target_x = -(BALL_SIZE - DOCK_SIZE)
-            target_y = max(0, min(y, sh - BALL_SIZE))
+            target_y = max(0, min(y, sh - DOCK_SIZE))
+            self._dock_cv.coords(self._dock_triangle,
+                DOCK_SIZE - 3, DOCK_SIZE // 2,
+                0, 3,
+                0, DOCK_SIZE - 3)
         elif edge == "right":
             target_x = sw - DOCK_SIZE
-            target_y = max(0, min(y, sh - BALL_SIZE))
+            target_y = max(0, min(y, sh - DOCK_SIZE))
+            self._dock_cv.coords(self._dock_triangle,
+                3, DOCK_SIZE // 2,
+                DOCK_SIZE, 3,
+                DOCK_SIZE, DOCK_SIZE - 3)
         elif edge == "top":
-            target_x = max(0, min(x, sw - BALL_SIZE))
+            target_x = max(0, min(x, sw - DOCK_SIZE))
             target_y = -(BALL_SIZE - DOCK_SIZE)
+            self._dock_cv.coords(self._dock_triangle,
+                DOCK_SIZE // 2, DOCK_SIZE - 3,
+                3, 0,
+                DOCK_SIZE - 3, 0)
         else:
-            target_x = max(0, min(x, sw - BALL_SIZE))
+            target_x = max(0, min(x, sw - DOCK_SIZE))
             target_y = sh - DOCK_SIZE
+            self._dock_cv.coords(self._dock_triangle,
+                DOCK_SIZE // 2, 3,
+                3, DOCK_SIZE,
+                DOCK_SIZE - 3, DOCK_SIZE)
 
         self._dock_offset = target_y if edge in ("left", "right") else target_x
+        self.win.geometry(f"{DOCK_SIZE}x{DOCK_SIZE}")
         self._animate_to(target_x, target_y)
 
     def _undock(self):
@@ -362,6 +443,9 @@ class FloatingWidget:
 
         self._docked = False
         self._dock_edge = None
+        self._dock_frame.pack_forget()
+        self._ball_frame.pack()
+        self.win.geometry(f"{BALL_SIZE}x{BALL_SIZE}")
         self._animate_to(target_x, target_y)
 
     # ── Animation ─────────────────────────────────────────────
@@ -397,6 +481,8 @@ class FloatingWidget:
         if hasattr(self, "_ball"):
             self._ball_cv.itemconfig(self._ball, fill=color)
             self._ball_cv.itemconfig(self._ball_text, text=STATUS_BALL_TEXT.get(state, "停止"))
+        if hasattr(self, "_dock_triangle"):
+            self._dock_cv.itemconfig(self._dock_triangle, fill=color)
         if hasattr(self, "_status_dot"):
             self._status_cv.itemconfig(self._status_dot, fill=color)
         if hasattr(self, "_status_lbl"):
